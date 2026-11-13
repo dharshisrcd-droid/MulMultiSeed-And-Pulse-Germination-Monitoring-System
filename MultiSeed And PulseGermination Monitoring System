@@ -1,0 +1,202 @@
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <DHT.h>
+
+// OLED Configuration
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+
+Adafruit_SSD1306 display(
+  SCREEN_WIDTH, SCREEN_HEIGHT,
+  &Wire, OLED_RESET
+);
+
+// DHT22 Sensor
+#define DHT_PIN 4
+#define DHT_TYPE DHT22
+
+DHT dht(DHT_PIN, DHT_TYPE);
+
+// MH-Z19C CO2 Sensor
+#define RX_PIN 16
+#define TX_PIN 17
+
+HardwareSerial CO2Serial(2);
+
+float temperature;
+float humidity;
+int co2ppm = -1;
+
+unsigned long startTime;
+
+// Read CO2 from MH-Z19C
+int readCO2() {
+
+  byte command[9] = {
+    0xFF, 0x01, 0x86,
+    0x00, 0x00, 0x00,
+    0x00, 0x00, 0x79
+  };
+
+  while (CO2Serial.available()) {
+    CO2Serial.read();
+  }
+
+  CO2Serial.write(command, 9);
+
+  byte response[9];
+  int count = 0;
+
+  unsigned long timeout = millis() + 1500;
+
+  while (count < 9 && millis() < timeout) {
+    if (CO2Serial.available()) {
+      response[count++] = CO2Serial.read();
+    }
+  }
+
+  if (count != 9) return -1;
+
+  if (response[0] != 0xFF ||
+      response[1] != 0x86) {
+    return -1;
+  }
+
+  byte checksum = 0;
+
+  for (int i = 1; i < 8; i++) {
+    checksum += response[i];
+  }
+
+  checksum = 0xFF - checksum + 1;
+
+  if (checksum != response[8]) return -1;
+
+  return response[2] * 256 + response[3];
+}
+
+// Display sensor readings
+void displayReadings() {
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(1);
+
+  display.setCursor(0, 0);
+  display.println("SEED MONITORING");
+
+  display.println("----------------");
+
+  display.print("Temp: ");
+  display.print(temperature);
+  display.println(" C");
+
+  display.print("Humidity: ");
+  display.print(humidity);
+  display.println(" %");
+
+  display.print("CO2: ");
+
+  if (co2ppm >= 0) {
+    display.print(co2ppm);
+    display.println(" ppm");
+  } else {
+    display.println("Sensor Error");
+  }
+
+  display.println("----------------");
+
+  unsigned long days =
+    (millis() - startTime) / 86400000UL;
+
+  display.print("Monitoring Day: ");
+  display.println(days + 1);
+
+  display.display();
+}
+
+void setup() {
+
+  Serial.begin(115200);
+
+  // DHT22 initialization
+  dht.begin();
+
+  // CO2 sensor initialization
+  CO2Serial.begin(
+    9600, SERIAL_8N1, RX_PIN, TX_PIN
+  );
+
+  // OLED initialization
+  if (!display.begin(
+      SSD1306_SWITCHCAPVCC, 0x3C)) {
+
+    Serial.println("OLED initialization failed");
+    while (true) delay(100);
+  }
+
+  startTime = millis();
+
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setCursor(0, 15);
+  display.println("GERMINATION");
+  display.println("MONITORING SYSTEM");
+  display.println("Initializing...");
+  display.display();
+
+  delay(2000);
+
+  Serial.println("Multi-Seed and Pulse");
+  Serial.println("Germination Monitoring System");
+  Serial.println("System Started");
+}
+
+void loop() {
+
+  // Read temperature and humidity
+  temperature = dht.readTemperature();
+  humidity = dht.readHumidity();
+
+  // Read CO2 concentration
+  co2ppm = readCO2();
+
+  Serial.println("----------------------");
+
+  Serial.println("GERMINATION MONITORING");
+
+  if (!isnan(temperature)) {
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.println(" C");
+  } else {
+    Serial.println("Temperature Sensor Error");
+  }
+
+  if (!isnan(humidity)) {
+    Serial.print("Humidity: ");
+    Serial.print(humidity);
+    Serial.println(" %");
+  } else {
+    Serial.println("Humidity Sensor Error");
+  }
+
+  if (co2ppm >= 0) {
+    Serial.print("CO2 Concentration: ");
+    Serial.print(co2ppm);
+    Serial.println(" ppm");
+  } else {
+    Serial.println("CO2 Sensor Error");
+  }
+
+  // Update OLED
+  if (!isnan(temperature) && !isnan(humidity)) {
+    displayReadings();
+  }
+
+  delay(5000);
+}
